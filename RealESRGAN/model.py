@@ -10,8 +10,6 @@ from .rrdbnet_arch import RRDBNet
 from .utils import pad_reflect, split_image_into_overlapping_patches, stich_together, \
                    unpad_image
 
-# Use a DataLoader for efficient data loading
-from torch.utils.data import DataLoader
 
 HF_MODELS = {
     2: dict(
@@ -27,6 +25,7 @@ HF_MODELS = {
         filename='RealESRGAN_x8.pth',
     ),
 }
+
 
 class RealESRGAN:
     def __init__(self, device, scale=4):
@@ -70,15 +69,10 @@ class RealESRGAN:
         )
         img = torch.FloatTensor(patches/255).permute((0,3,1,2)).to(device).detach()
 
-        # Use DataLoader for efficient data loading
-        dataloader = DataLoader(img, batch_size=batch_size, num_workers=4)
-
         with torch.no_grad():
-            for i, batch in enumerate(dataloader):
-                if i == 0:
-                    res = self.model(batch)
-                else:
-                    res = torch.cat((res, self.model(batch)), 0)
+            res = self.model(img[0:batch_size])
+            for i in range(batch_size, img.shape[0], batch_size):
+                res = torch.cat((res, self.model(img[i:i+batch_size])), 0)
 
         sr_image = res.permute((0,2,3,1)).clamp_(0, 1).cpu()
         np_sr_image = sr_image.numpy()
