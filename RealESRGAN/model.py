@@ -3,7 +3,6 @@ import torch
 from torch.nn import functional as F
 from PIL import Image
 import numpy as np
-import multiprocessing as mp
 import cv2
 from huggingface_hub import hf_hub_url, cached_download
 
@@ -11,6 +10,8 @@ from .rrdbnet_arch import RRDBNet
 from .utils import pad_reflect, split_image_into_overlapping_patches, stich_together, \
                    unpad_image
 
+# Use a DataLoader for efficient data loading
+from torch.utils.data import DataLoader
 
 HF_MODELS = {
     2: dict(
@@ -26,7 +27,6 @@ HF_MODELS = {
         filename='RealESRGAN_x8.pth',
     ),
 }
-
 
 class RealESRGAN:
     def __init__(self, device, scale=4):
@@ -57,7 +57,7 @@ class RealESRGAN:
         self.model.eval()
         self.model.to(self.device)
         
-      @torch.cuda.amp.autocast()
+    @torch.cuda.amp.autocast()
     def predict(self, lr_image, batch_size=4, patches_size=192,
                 padding=24, pad_size=15):
         scale = self.scale
@@ -70,16 +70,15 @@ class RealESRGAN:
         )
         img = torch.FloatTensor(patches/255).permute((0,3,1,2)).to(device).detach()
 
-        # Create a multiprocessing pool
-        with mp.Pool() as pool:
-            # Split the image tensor into a list of tensors
-            img_list = [img[i:i+batch_size] for i in range(0, img.shape[0], batch_size)]
-            
-            # Use the pool to process the batches in parallel
-            results = pool.map(self.model, img_list)
+        # Use DataLoader for efficient data loading
+        dataloader = DataLoader(img, batch_size=batch_size, num_workers=4)
 
-        # Concatenate the results back into a single tensor
-        res = torch.cat(results, 0)
+        with torch.no_grad():
+            for i, batch in enumerate(dataloader):
+                if i == 0:
+                    res = self.model(batch)
+                else:
+                    res = torch.cat((res, self.model(batch)), 0)
 
         sr_image = res.permute((0,2,3,1)).clamp_(0, 1).cpu()
         np_sr_image = sr_image.numpy()
